@@ -41,10 +41,12 @@
 
 # COMMAND ----------
 
+# DBTITLE 1,Database Transactions
 display(spark.read.table(config['db_transactions']))
 
 # COMMAND ----------
 
+# DBTITLE 1,Entities with matching emails
 display(
   sql("""
   select * 
@@ -76,11 +78,15 @@ from graphframes import *
 
 # COMMAND ----------
 
+# DBTITLE 1,Building our graph
 # MAGIC %md
 # MAGIC We build our graph structure where nodes will capture distinct transaction attributes (email/phone/address) and edges the relationships between those attributes. A transaction involving customer A and email address E would connect "node" A with "node" E. Our graph becomes undirected / unweighted network.
+# MAGIC 
+# MAGIC <img src="https://github.com/stephanieamrivera/upgraded-octo-parakeet/blob/main/slides/AML%20Example%20Graph.png?raw=true" width=850>
 
 # COMMAND ----------
 
+# DBTITLE 1,Codifying the nodes and edges
 identity_edges = sql('''
 select entity_id as src, address as dst from {0} where address is not null
 union
@@ -104,17 +110,47 @@ aml_identity_g = GraphFrame(identity_nodes, identity_edges)
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC 
+# MAGIC <img src = "https://github.com/stephanieamrivera/upgraded-octo-parakeet/blob/main/slides/AML%20Example%20Graph%20Degrees.png?raw=true" width=850>
+
+# COMMAND ----------
+
+# DBTITLE 1,Using graph properties to add the vertex degree as a property of the vertices then remove non-person nodes with degree 1
+from pyspark.sql.functions import *
+import uuid
+sc.setCheckpointDir('{}/chk_{}'.format(temp_directory, uuid.uuid4().hex))
+result = aml_identity_g.degrees
+result = aml_identity_g.vertices.join(result,'id')
+identity_nodes2 = result.filter(~((col("type") !='Person') & (col("degree") == 1)))
+display(identity_nodes2)
+
+
+# COMMAND ----------
+
+# DBTITLE 1,Construct new graph
+aml_identity_g2 = GraphFrame(identity_nodes2, identity_edges)
+
+# COMMAND ----------
+
+# DBTITLE 1,Using graph algorithms to understand the relationships between entities 
+# MAGIC %md
 # MAGIC Graph built-in models such as a [connected components](https://graphframes.github.io/graphframes/docs/_site/user-guide.html#connected-components) drastically simplifies our overall investigation. Instead of recursively joining our dataset for connected entities, this simple API call will return groups of nodes having at least one entity in common. 
 
 # COMMAND ----------
 
 import uuid
 sc.setCheckpointDir('{}/chk_{}'.format(temp_directory, uuid.uuid4().hex))
-result = aml_identity_g.connectedComponents()
+result = aml_identity_g2.connectedComponents()
 result.select("id", "component", 'type').createOrReplaceTempView("components")
 
 # COMMAND ----------
 
+# DBTITLE 1,Components are the groups of nodes having at least one entity in common
+display(result)
+
+# COMMAND ----------
+
+# DBTITLE 1,Select the components that have more than one "person" entity 
 # MAGIC %md
 # MAGIC As we gain deeper insights of our graph structure, the results can be further analyzed through simple SQL. Used as a silver layer, this data asset can be used to find synthetic IDs at minimal cost.
 
@@ -138,7 +174,7 @@ result.select("id", "component", 'type').createOrReplaceTempView("components")
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC It would appear that 766 records in our set would be having at least one entity in common to a different account.
+# MAGIC It would appear that 766 records in our set would be having at least one person entity in common with a different account.
 
 # COMMAND ----------
 
@@ -147,7 +183,14 @@ result.select("id", "component", 'type').createOrReplaceTempView("components")
 
 # COMMAND ----------
 
-from pyspark.sql.functions import *
+# DBTITLE 1,The example graph was also an example of a connected component in the overall graph - Here is that specific component
+# MAGIC %sql
+# MAGIC select * from ptntl_synthetic_ids WHERE component = "68719476774"
+
+# COMMAND ----------
+
+# DBTITLE 1,Filtering out the suspect people/IDs 
+
 
 suspicious_component_id = (
   spark
@@ -158,6 +201,16 @@ suspicious_component_id = (
 
 ids = suspicious_component_id.join(spark.table("ptntl_synthetic_ids"), ['component', 'id'])
 ids.createOrReplaceTempView("sus_ids")
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC select * from sus_ids WHERE component = "68719476774"
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC select component, COUNT(*) as person_per_component from sus_ids GROUP BY component
 
 # COMMAND ----------
 
@@ -192,6 +245,10 @@ from
   ) foo
 group by component
 """)
+
+# COMMAND ----------
+
+display(entity_synth_scores)
 
 # COMMAND ----------
 
