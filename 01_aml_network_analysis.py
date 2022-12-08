@@ -36,15 +36,18 @@
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC #### Using SQL 
+# MAGIC **Using SQL**
+# MAGIC 
 # MAGIC Before jumping straight into graph theory, we first want to get a glimpse at our synthetic data set using standard SQL. By joining our dataset by itself, we can easily extract entities sharing a same attribute such as email address. Although feasible for a 1st or 2nd degree connection, deeper insights can only be gained with more advanced network techniques as described later.
 
 # COMMAND ----------
 
+# DBTITLE 1,Database Transactions [Used later]
 display(spark.read.table(config['db_transactions']))
 
 # COMMAND ----------
 
+# DBTITLE 1,Entities with matching emails [Display Only]
 display(
   sql("""
   select * 
@@ -68,7 +71,7 @@ display(
 
 # MAGIC %md
 # MAGIC #### Using GraphFrames
-# MAGIC As we want to explore deeper relationships, our SQL statement will exponentially grow in size and complexity, requiring a graph library such as Graphframes. GraphFrames is a package for Apache Spark which provides DataFrame-based Graphs. It provides high-level APIs in Scala, Java, and Python. It aims to provide both the functionality of GraphX and extended functionality taking advantage of Spark DataFrames. This extended functionality includes motif finding, DataFrame-based serialization, and highly expressive graph queries.
+# MAGIC As we want to explore deeper relationships, our SQL statement will exponentially grow in size and complexity, requiring a graph library such as Graphframes. [GraphFrames](https://graphframes.github.io/graphframes/docs/_site/user-guide.html#basic-graph-and-dataframe-queries) is a package for Apache Spark which provides DataFrame-based Graphs. It provides high-level APIs in Scala, Java, and Python. It aims to provide both the functionality of GraphX and extended functionality taking advantage of Spark DataFrames. This extended functionality includes motif finding, DataFrame-based serialization, and highly expressive graph queries.
 
 # COMMAND ----------
 
@@ -76,11 +79,15 @@ from graphframes import *
 
 # COMMAND ----------
 
+# DBTITLE 1,Building our graph
 # MAGIC %md
 # MAGIC We build our graph structure where nodes will capture distinct transaction attributes (email/phone/address) and edges the relationships between those attributes. A transaction involving customer A and email address E would connect "node" A with "node" E. Our graph becomes undirected / unweighted network.
+# MAGIC 
+# MAGIC <img src="https://github.com/stephanieamrivera/upgraded-octo-parakeet/blob/main/slides/AML%20Example%20Graph.png?raw=true" width=850>
 
 # COMMAND ----------
 
+# DBTITLE 1,Codifying the nodes and edges
 identity_edges = sql('''
 select entity_id as src, address as dst from {0} where address is not null
 union
@@ -104,17 +111,50 @@ aml_identity_g = GraphFrame(identity_nodes, identity_edges)
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC 
+# MAGIC <img src = "https://github.com/stephanieamrivera/upgraded-octo-parakeet/blob/main/slides/AML%20Example%20Graph%20Degrees.png?raw=true" width=850>
+
+# COMMAND ----------
+
+# DBTITLE 1,Using graph properties to add the vertex degree as a property of the vertices then remove non-person nodes with degree 1
+from pyspark.sql.functions import *
+import uuid
+sc.setCheckpointDir('{}/chk_{}'.format(temp_directory, uuid.uuid4().hex))
+result = aml_identity_g.degrees
+result = aml_identity_g.vertices.join(result,'id')
+identity_nodes2notpeople = result.filter(col("type") != 'Person').filter(col("degree") != 1)
+identity_nodes2people = result.filter(col("type") == 'Person')
+identity_nodes2 = identity_nodes2notpeople.union(identity_nodes2people)
+display(identity_nodes2)
+
+
+# COMMAND ----------
+
+# DBTITLE 1,Construct new graph
+aml_identity_g2 = GraphFrame(identity_nodes2, identity_edges)
+
+# COMMAND ----------
+
+# DBTITLE 1,Using graph algorithms to understand the relationships between entities 
+# MAGIC %md
 # MAGIC Graph built-in models such as a [connected components](https://graphframes.github.io/graphframes/docs/_site/user-guide.html#connected-components) drastically simplifies our overall investigation. Instead of recursively joining our dataset for connected entities, this simple API call will return groups of nodes having at least one entity in common. 
 
 # COMMAND ----------
 
 import uuid
 sc.setCheckpointDir('{}/chk_{}'.format(temp_directory, uuid.uuid4().hex))
-result = aml_identity_g.connectedComponents()
+result = aml_identity_g2.connectedComponents()
 result.select("id", "component", 'type').createOrReplaceTempView("components")
 
 # COMMAND ----------
 
+# DBTITLE 1,Components are the groups of nodes having at least one entity in common
+# MAGIC %sql
+# MAGIC SELECT * FROM components
+
+# COMMAND ----------
+
+# DBTITLE 1,Select the components that have more than one "person" entity 
 # MAGIC %md
 # MAGIC As we gain deeper insights of our graph structure, the results can be further analyzed through simple SQL. Used as a silver layer, this data asset can be used to find synthetic IDs at minimal cost.
 
@@ -137,27 +177,15 @@ result.select("id", "component", 'type').createOrReplaceTempView("components")
 
 # COMMAND ----------
 
-# MAGIC %md
-# MAGIC It would appear that 766 records in our set would be having at least one entity in common to a different account.
-
-# COMMAND ----------
-
 # MAGIC %sql
 # MAGIC select * from ptntl_synthetic_ids
 
 # COMMAND ----------
 
-from pyspark.sql.functions import *
-
-suspicious_component_id = (
-  spark
-    .sql("select id, component, type from ptntl_synthetic_ids")
-    .filter(col('type') == 'Person')
-    .drop('type')
-)
-
-ids = suspicious_component_id.join(spark.table("ptntl_synthetic_ids"), ['component', 'id'])
-ids.createOrReplaceTempView("sus_ids")
+# DBTITLE 1,The example graph was also an example of a connected component in the overall graph - Here is that specific component
+# MAGIC %sql
+# MAGIC with example as (select component from ptntl_synthetic_ids WHERE id = "4960")
+# MAGIC select * from ptntl_synthetic_ids WHERE component in (select * from example)
 
 # COMMAND ----------
 
@@ -166,36 +194,38 @@ ids.createOrReplaceTempView("sus_ids")
 
 # COMMAND ----------
 
-entity_synth_scores = sql("""
-select
-  component,
-  min(min_id) first_entity_id, 
-  max(max_id) last_entity_id,
-  sum(
-    case
-      when dupe_ct = 1 then 1 else 0
-    end
-  ) entity_synth_score
-from
-  (
-    select
-      component,
-      type,
-      min(id) min_id,
-      max(id) max_id,
-      count(1) dupe_ct
-    from
-      ptntl_synthetic_ids
-    group by
-      component,
-      type
-  ) foo
-group by component
-""")
+# DBTITLE 1,Filtering down to the suspect people/IDs and their shared attributes
+suspicious_component_id = (
+  spark
+    .sql("select id as id0, component, type from ptntl_synthetic_ids")
+    .filter(col('type') == 'Person')
+    .drop('type')
+)
+
+ids = suspicious_component_id.join(spark.table("ptntl_synthetic_ids"), ['component']).filter(col('id0') != col('id'))
+ids.createOrReplaceTempView("sus_ids")
 
 # COMMAND ----------
 
-entity_synth_scores.write.format("delta").mode('overwrite').saveAsTable(config['db_synth_scores'])
+# DBTITLE 1,Touching back to our example
+# MAGIC %sql
+# MAGIC select * from sus_ids WHERE component = "68719476738"
+
+# COMMAND ----------
+
+# DBTITLE 1,The synth score is the number of shared attributes plus the number of persons they share with
+# MAGIC %sql 
+# MAGIC CREATE OR REPLACE table entity_synth_scores as (
+# MAGIC   select
+# MAGIC     component,
+# MAGIC     id0,
+# MAGIC     count(*) as synth_score
+# MAGIC   from
+# MAGIC     sus_ids
+# MAGIC   GROUP BY
+# MAGIC     component,
+# MAGIC     id0
+# MAGIC )
 
 # COMMAND ----------
 
@@ -204,14 +234,22 @@ entity_synth_scores.write.format("delta").mode('overwrite').saveAsTable(config['
 
 # COMMAND ----------
 
-display(spark.read.table(config['db_synth_scores']).orderBy(desc('entity_synth_score')))
+# DBTITLE 1,Higher score is higher risk
+# MAGIC %sql
+# MAGIC 
+# MAGIC SELECT * from entity_synth_scores
+
+# COMMAND ----------
+
+entity_synth_scores = sql("""SELECT * from entity_synth_scores""")
+entity_synth_scores.write.format("delta").mode('overwrite').option("overwriteSchema", "true").saveAsTable(config['db_synth_scores'])
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC ## Structuring/Smurfing
 # MAGIC 
-# MAGIC Another common pattern seen often is one called structuring in which multiple entities send collude and send smaller ‘under the radar’ payments to a set of banks, which subsequently route larger aggregate amounts to a final institution on the far right. In this scenario, all parties have stayed underneath the $10,000 amount which would typically flag authorities. Not only is this easily accomplished with graph analytics, but the motif finding technique used can be automated to extend to other permutations of networks to find other alerts in the same way. We represent this technique through the form of a simple graph below
+# MAGIC Another common pattern seen often is one called structuring in which multiple entities collude by sending smaller ‘under the radar’ payments to a set of banks, which subsequently route larger aggregate amounts to a final institution on the far right. In this scenario, all parties have stayed underneath the $10,000 amount which would typically flag authorities. Not only is this easily accomplished with graph analytics, but the motif finding technique used can be automated to extend to other permutations of networks to find other alerts in the same way. We represent this technique through the form of a simple graph below
 # MAGIC 
 # MAGIC <img src="https://databricks.com/wp-content/uploads/2021/07/AML-on-Lakehouse-Platform-blog-img-4.jpg" width="800"/>
 
@@ -222,6 +260,7 @@ display(spark.read.table(config['db_synth_scores']).orderBy(desc('entity_synth_s
 
 # COMMAND ----------
 
+# DBTITLE 1,Creating the Graphframe
 entity_edges = spark.sql(
 """
 select 
@@ -257,20 +296,30 @@ entity_nodes.createOrReplaceTempView("entity_nodes")
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC Let’s write the basic motif-finding code to detect the scenario above. 
+# MAGIC ### Motifs
+# MAGIC 
+# MAGIC Let’s write the basic motif-finding code to detect a possible scenario. 
+# MAGIC 
+# MAGIC <img src="https://github.com/SpyderRivera/upgraded-octo-parakeet/blob/main/slides/motif.png?raw=true" width="800"/>
 
 # COMMAND ----------
 
-motif = "(a)-[e1]->(b); (b)-[e2]->(c); (c)-[e3]->(d); (e)-[e4]->(f); (f)-[e5]->(c); (c)-[e6]->(g)"
+# DBTITLE 1,This motif does exists
+motif = "(a)-[e1]->(b); (b)-[e2]->(c); (d)-[e3]->(f); (f)-[e5]->(c); (c)-[e6]->(g)"
 struct_scn_1 = aml_entity_g.find(motif)
 
+display(struct_scn_1)
+
+# COMMAND ----------
+
+# DBTITLE 1,Join the subgraphs by g when the amounts sent to g are large
 joined_graphs = (
-  struct_scn_1.alias("a")
-  .join(struct_scn_1.alias("b"), col("a.g.id") == col("b.g.id"))
-  .filter(col("a.e6.txn_amount") + col("b.e6.txn_amount") > 10000)
+  struct_scn_1.alias("graph1")
+  .join(struct_scn_1.alias("graph2"), col("graph1.g.id") == col("graph2.g.id"))
+  .filter(col("graph1.e6.txn_amount") + col("graph2.e6.txn_amount") > 10000)
 )
 
-joined_graphs.selectExpr("a.*").write.option("overwriteSchema", "true").mode('overwrite').saveAsTable(config['db_structuring'])
+joined_graphs.selectExpr("graph1.*").write.option("overwriteSchema", "true").mode('overwrite').saveAsTable(config['db_structuring'])
 
 # COMMAND ----------
 
@@ -279,24 +328,38 @@ joined_graphs.selectExpr("a.*").write.option("overwriteSchema", "true").mode('ov
 
 # COMMAND ----------
 
-display(
-  sql(
+levels = sql(
     """
-    select distinct b.entity_id top_entity_id, b.name first_entity, c.name second_entity, d.name third_entity, e.name fourth_entity
-    from {0} a 
-    join {1} b 
-    on a.a.id = b.entity_id
-    join {1} c 
-    on a.b.id = c.entity_id
-    join {1} d 
-    on a.c.id = d.entity_id
-    join {1} e
-    on a.d.id = e.entity_id
-    where e.entity_type = 'Company'
-    order by (cast(top_entity_id as integer))
+    SELECT * FROM (SELECT DISTINCT entity0.name l0_name, entity1.name l1_name, entity2.name l2_name, entity3.name l3_name
+    from {0} graph
+    join {1} entity0
+    on graph.a.id = entity0.entity_id
+    join {1} entity1
+    on graph.b.id = entity1.entity_id
+    join {1} entity2 
+    on graph.c.id = entity2.entity_id
+    join {1} entity3
+    on graph.g.id = entity3.entity_id
+    where entity3.entity_type = 'Company') abcg
+    UNION ALL
+    SELECT * FROM (SELECT DISTINCT entity0.name l0_name, entity1.name l1_name, entity2.name l2_name, entity3.name l3_name
+    from {0} graph
+    join {1} entity0
+    on graph.d.id = entity0.entity_id
+    join {1} entity1
+    on graph.f.id = entity1.entity_id
+    join {1} entity2 
+    on graph.c.id = entity2.entity_id
+    join {1} entity3
+    on graph.g.id = entity3.entity_id
+    where entity3.entity_type = 'Company') dfcg
     """.format(config['db_structuring'], config['db_entities'])
   )
-)
+levels.write.option("overwriteSchema", "true").mode('overwrite').saveAsTable(config['structuring_levels'])
+
+# COMMAND ----------
+
+display(levels)
 
 # COMMAND ----------
 
@@ -309,9 +372,11 @@ display(
 
 # COMMAND ----------
 
+# DBTITLE 1,Similar Round-tripping Motif
 motif = "(a)-[e1]->(b); (b)-[e2]->(c); (c)-[e3]->(d); (d)-[e4]->(a)"
 round_trip = aml_entity_g.find(motif)
 round_trip.write.mode('overwrite').saveAsTable(config['db_roundtrips'])
+display(round_trip)
 
 # COMMAND ----------
 
@@ -324,17 +389,17 @@ display(
   sql(
     """
     select
-      b.name original_entity,
-      c.name intermediate_entity_1,
-      d.name intermediate_entity_2,
-      e.name final_entity,
-      a.e1.txn_amount + a.e2.txn_amount + a.e3.txn_amount + a.e4.txn_amount agg_txn_amount
+      ents0.name original_entity,
+      ents1.name intermediate_entity_1,
+      ents2.name intermediate_entity_2,
+      ents3.name intermediate_entity_3,
+      int(rt.e1.txn_amount) + int(rt.e2.txn_amount) + int(rt.e3.txn_amount) + int(rt.e4.txn_amount) agg_txn_amount
     from
-      {0} a
-      join {1} b on a.a.id = b.entity_id
-      join {1} c on a.b.id = c.entity_id
-      join {1} d on a.c.id = d.entity_id
-      join {1} e on a.d.id = e.entity_id
+      {0} rt
+      join {1} ents0 on rt.a.id = ents0.entity_id
+      join {1} ents1 on rt.b.id = ents1.entity_id
+      join {1} ents2 on rt.c.id = ents2.entity_id
+      join {1} ents3 on rt.d.id = ents3.entity_id
     """.format(config['db_roundtrips'], config['db_entities'])
   )
 )
