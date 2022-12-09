@@ -355,7 +355,7 @@ levels = sql(
     where entity3.entity_type = 'Company') dfcg
     """.format(config['db_structuring'], config['db_entities'])
   )
-levels.write.option("overwriteSchema", "true").mode('overwrite').saveAsTable(config['structuring_levels'])
+levels.write.option("overwriteSchema", "true").mode('overwrite').saveAsTable(config['db_structuring_levels'])
 
 # COMMAND ----------
 

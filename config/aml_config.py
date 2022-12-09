@@ -37,6 +37,7 @@ config = {
   'db_dedupe': f"{database_name}.dedupe",
   'db_synth_scores': f"{database_name}.synth_scores",
   'db_structuring': f"{database_name}.structuring",
+  'db_structuring_levels': f"{database_name}.structuring_levels",
   'db_roundtrips': f"{database_name}.roundtrips",
   'db_risk_propagation': f"{database_name}.risk_propagation",
   'db_streetview': f"{database_name}.streetview",
