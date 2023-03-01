@@ -13,7 +13,7 @@
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC Developped by the ministry of Justice, [Splink](https://github.com/moj-analytical-services/splink) is an entity linkage framework that offers configurations to specify matching columns as well as blocking rules at enterprise scale. By combining field attributes (such as organization + mailing address), we could detect similarities and de-duplicate matching records. Splink works by assigning a match probability which can be used to identify transactions in which entity attributes are highly similar, indicating a potential alert in reported address, entity name, or transaction amounts. Given the fact that entity resolution can be highly manual for matching account information, having open-source libraries which automated this task and which save this information in Delta Lake can make investigators much more productive for case resolution. While there are several options available for entity matching like the one using Locality-Sensitive Hashing (LSH) as mentioned in this blog [post](https://databricks.com/blog/2021/05/24/machine-learning-based-item-matching-for-retailers-and-brands.html), we recommend our readers to identify the right algorithm for the job.
+# MAGIC Developed by the ministry of Justice, [Splink](https://github.com/moj-analytical-services/splink) is an entity linkage framework that offers configurations to specify matching columns as well as blocking rules at enterprise scale. By combining field attributes (such as organization + mailing address), we could detect similarities and de-duplicate matching records. Splink works by assigning a match probability which can be used to identify transactions in which entity attributes are highly similar, indicating a potential alert in reported address, entity name, or transaction amounts. Given the fact that entity resolution can be highly manual for matching account information, having open-source libraries which automated this task and which save this information in Delta Lake can make investigators much more productive for case resolution. While there are several options available for entity matching like the one using Locality-Sensitive Hashing (LSH) as mentioned in this blog [post](https://databricks.com/blog/2021/05/24/machine-learning-based-item-matching-for-retailers-and-brands.html), we recommend our readers to identify the right algorithm for the job.
 
 # COMMAND ----------
 
@@ -86,7 +86,7 @@ displayHTML(html_file_content)
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC As we continue our exploratory data analysis we can also look at individual matches and respective explanations. In the below example we are matching on Org name and Address and the respective match probabilities are shown for these levels. Another good example would be to show matches on a person's name, address and deposit amounts to detect high volume of supicious transactions.
+# MAGIC As we continue our exploratory data analysis we can also look at individual matches and respective explanations. In the below example we are matching on Org name and Address and the respective match probabilities are shown for these levels. Another good example would be to show matches on a person's name, address and deposit amounts to detect high volume of suspicious transactions.
 
 # COMMAND ----------
 
@@ -108,7 +108,7 @@ display(df2)
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC Similar to our de-dpulication strategy at an entity level, we can deduplicate multiple fields such as originator and recipient mailing addresses.
+# MAGIC Similar to our de-duplication strategy at an entity level, we can deduplicate multiple fields such as originator and recipient mailing addresses.
 
 # COMMAND ----------
 
@@ -141,6 +141,6 @@ display(df2_e.filter( (col("rptd_originator_address_l") != '')).filter((col("rpt
 
 # MAGIC %md
 # MAGIC ## Closing thoughts
-# MAGIC In this series of notebooks, we briefly touched on different technical concepts as they pertain to AML investigations. From network analysis, computer vision and entity resolution, we demonstrated the need for AI to complement decisioning and reduce investigation time. Although we kept the investigation aspect light, we covered why the Lakehouse architecture is the most scalable and versatile platform to enable analysts in their AML analytics. All of these capabilities will allow your organization to reduce TCO compared to proprietary AML solutions. Organizations can start embedding advanced analytics in their day to day process by bringing additional context to their investigations team rather than trying to automate what is often regarded as the most regulated activity. AI as **augmented intelligence**, we can easily package all necessary AI driven insights throught the form of simple dashboarding capabilities for analysts to act upon.
+# MAGIC In this series of notebooks, we briefly touched on different technical concepts as they pertain to AML investigations. From network analysis, computer vision and entity resolution, we demonstrated the need for AI to complement decisioning and reduce investigation time. Although we kept the investigation aspect light, we covered why the Lakehouse architecture is the most scalable and versatile platform to enable analysts in their AML analytics. All of these capabilities will allow your organization to reduce TCO compared to proprietary AML solutions. Organizations can start embedding advanced analytics in their day to day process by bringing additional context to their investigations team rather than trying to automate what is often regarded as the most regulated activity. AI as **augmented intelligence**, we can easily package all necessary AI driven insights through the form of simple dashboarding capabilities for analysts to act upon.
 # MAGIC 
 # MAGIC <img src=https://brysmiwasb.blob.core.windows.net/demos/aml/aml_dashboard.png width=800>
