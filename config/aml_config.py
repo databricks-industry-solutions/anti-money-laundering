@@ -8,6 +8,17 @@ warnings.filterwarnings("ignore")
 
 # COMMAND ----------
 
+def tear_down():
+  import shutil
+  try:
+    shutil.rmtree(temp_directory)
+  except:
+    pass
+  _ = sql("DROP DATABASE IF EXISTS {} CASCADE".format(database_name))
+  dbutils.fs.rm(home_directory, True)
+
+# COMMAND ----------
+
 import re
 from pathlib import Path
 
@@ -16,15 +27,22 @@ useremail = dbutils.notebook.entry_point.getDbutils().notebook().getContext().us
 username = useremail.split('@')[0]
 
 # Similar to database, we will store actual content on a given path
-home_directory = '/FileStore/{}/aml'.format(username)
+home_directory = '/home/{}/aml'.format(username)
 dbutils.fs.mkdirs(home_directory)
 
 # Please replace this cell should you want to store data somewhere else.
 database_name = '{}_aml'.format(re.sub('\W', '_', username))
-_ = sql(f"CREATE DATABASE IF NOT EXISTS {database_name} LOCATION '{home_directory}'")
 
-# Where we might stored temporary data on local disk
+# Where we might store temporary data on local disk
 temp_directory = "/tmp/{}/aml".format(username)
+
+# COMMAND ----------
+
+tear_down()
+
+# COMMAND ----------
+
+_ = sql(f"CREATE DATABASE IF NOT EXISTS {database_name} LOCATION '{home_directory}'")
 Path(temp_directory).mkdir(parents=True, exist_ok=True)
 
 # COMMAND ----------
@@ -80,14 +98,3 @@ if len(tables) == 0:
 import mlflow
 experiment_name = f"/Users/{useremail}/aml_experiment"
 mlflow.set_experiment(experiment_name) 
-
-# COMMAND ----------
-
-def tear_down():
-  import shutil
-  try:
-    shutil.rmtree(temp_directory)
-  except:
-    pass
-  _ = sql("DROP DATABASE IF EXISTS {} CASCADE".format(database_name))
-  dbutils.fs.rm(home_directory, True)
